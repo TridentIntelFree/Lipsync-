@@ -13,12 +13,33 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .assets import cache_dir
 from .recognize import BEAM_SIZE, CTC_WEIGHT, LENGTH_PENALTY, LM_WEIGHT, WEIGHTS
 
 _TOKENS = Path(__file__).parent / "tokens" / "unigram5000_units.txt"
+_VENDOR = Path(__file__).parent / "vendor"
+
+
+def _use_vendored_espnet() -> None:
+    """Put the vendored espnet subset ahead of anything installed.
+
+    The released checkpoints need a 3D-convolution visual front end that stock
+    espnet does not have — its encoder only offers audio input layers, so a
+    pip-installed espnet cannot load these weights at all. The vendored subset
+    is the modified build that can. See VENDOR.md.
+
+    It is placed first on the path deliberately: if both are importable, ours
+    has to win, or model construction fails on an unknown ``conv3d`` layer.
+    """
+    path = str(_VENDOR)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    elif sys.path[0] != path:
+        sys.path.remove(path)
+        sys.path.insert(0, path)
 
 
 def _load_token_list(train_args) -> list[str]:
@@ -36,6 +57,8 @@ class AutoAVSRRecognizer:
     """Visual speech recogniser over preprocessed mouth ROIs."""
 
     def __init__(self, device: str = "cpu"):
+        _use_vendored_espnet()
+
         import torch
         from espnet.asr.asr_utils import get_model_conf, torch_load
         from espnet.nets.batch_beam_search import BatchBeamSearch

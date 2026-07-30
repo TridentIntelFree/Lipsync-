@@ -20,12 +20,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The recognition backend. Heavy, and the checkpoints it downloads are released
-# for non-commercial use — see docs/RECOGNIZER.md.
+# The recognition backend. Note there is deliberately no espnet requirement:
+# stock espnet has no 3D-convolution visual front end and cannot load these
+# checkpoints, so the modified subset that can is vendored in lipsync/vendor.
+# See VENDOR.md. The checkpoints this downloads are non-commercial — see
+# docs/RECOGNIZER.md.
 recognize = [
     "torch>=2.0",
-    "espnet>=202301",
-    "sentencepiece>=0.1.99",
+    "torchaudio>=2.0",
 ]
 dev = [
     "pytest>=7.4",
@@ -38,7 +40,7 @@ lipsync = "lipsync.cli:main"
 include = ["lipsync*"]
 
 [tool.setuptools.package-data]
-lipsync = ["tokens/*.txt"]
+lipsync = ["tokens/*.txt", "vendor/LICENSE.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

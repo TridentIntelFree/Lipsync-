@@ -53,17 +53,25 @@ pip install -e .
 That is enough to decode video, align mouths and run quality checks. It pulls
 its own ffmpeg, so there is no system dependency.
 
-Recognition — turning mouth crops into words — needs the model backend and about
-1 GB of weights:
+Recognition — turning mouth crops into words — needs PyTorch and about 1 GB of
+weights:
 
 ```sh
 pip install -e '.[recognize]'
 python -m lipsync.recognize --download
+python -m lipsync.recognize --check
 ```
+
+There is deliberately no `espnet` in that install. Stock espnet has no
+3D-convolution visual front end and **cannot load these checkpoints at all**; the
+modified build that can is vendored in `lipsync/vendor/` and takes precedence
+automatically. See `VENDOR.md`.
 
 Weights come from public HuggingFace mirrors over plain HTTPS. No account, no
 token, no licence click-through. They are cached in `~/.cache/lipsync`
-(override with `LIPSYNC_CACHE`).
+(override with `LIPSYNC_CACHE`). If your network blocks the download, fetch the
+four files listed in `docs/RECOGNIZER.md` elsewhere and drop them in that
+directory.
 
 ## Use
 
@@ -94,7 +102,8 @@ lipsync talk.mp4 --json             # machine-readable, includes the caveat
 lipsync talk.mp4 --save-rois r.npy  # dump the aligned mouth crops
 ```
 
-Exit codes: `0` success, `2` input unusable, `3` backend not installed.
+Exit codes: `0` success, `2` input unusable, `3` backend not installed,
+`4` weights could not be downloaded.
 
 From Python:
 
@@ -167,27 +176,33 @@ which is why those values live in `constants.py` with their provenance recorded.
 | `pipeline.py` | Orchestration, tensor shaping |
 | `recognize.py` | Weight fetching, transcript plus caveat |
 | `backend.py` | Checkpoint loading and beam search |
+| `vendor/` | Modified espnet providing the visual front end (see `VENDOR.md`) |
 
 ## Status
 
-Preprocessing — everything from video file to model-ready tensor — is built and
-tested. `pytest` runs 52 tests covering decode, frame-rate resampling,
-alignment, gap filling, smoothing, crop geometry, the CLI and every quality
-threshold.
-The alignment is verified to recover the canonical layout under arbitrary
-rotation, scale and translation, and mouth crops were confirmed correctly framed
-and stable on real video.
+`pytest` runs 59 tests. Verified:
 
-The recognition backend is written against the reference implementation but has
-**not been executed here** — the environment this was built in blocks
-`huggingface.co`, so the checkpoints could not be downloaded and the
-video-to-text path is unverified end to end. It is deliberately a thin wrapper
-over the reference model rather than a re-implementation: a hand-written
-Conformer that merely loaded without error would produce plausible wrong text,
-which is the worst failure this project could have.
+- Decode and frame-rate resampling, on real generated video files.
+- Alignment recovers the canonical face layout under arbitrary rotation, scale
+  and translation; mouth crops confirmed correctly framed and stable on real
+  video of a moving head.
+- Gap interpolation, temporal smoothing, crop geometry, tensor normalisation,
+  every quality threshold, and the CLI's failure paths.
+- The model contract: a real pipeline tensor flows through the vendored
+  3D-conv/ResNet front end and the full Conformer encoder, emitting exactly one
+  encoder step per video frame.
 
-Run `python -m lipsync.recognize --check` to see whether weights and backend are
-ready on your machine.
+Not verified: **decoding weights into text.** The environment this was built in
+blocks `huggingface.co`, so the checkpoints were never downloaded and no actual
+transcript has been produced. Everything up to and including the encoder's
+shape contract is exercised; the beam search over real weights is not.
+
+The backend is a thin wrapper over the reference implementation rather than a
+re-implementation, deliberately — a hand-written Conformer that merely loaded
+without error would emit plausible wrong text, the worst failure this project
+could have.
+
+Run `python -m lipsync.recognize --check` to see where your machine stands.
 
 ## Licence and provenance
 

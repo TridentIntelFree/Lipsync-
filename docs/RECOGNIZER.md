@@ -31,6 +31,12 @@ python -m lipsync.recognize --download
 python -m lipsync.recognize --check
 ```
 
+That installs PyTorch and torchaudio, and nothing else. In particular it does
+**not** install espnet: the stock package has no 3D-convolution visual front end
+and cannot load these checkpoints. The modified subset that can is vendored in
+`lipsync/vendor/` and is placed ahead of any installed espnet automatically, so
+having espnet installed for other reasons is harmless. See `VENDOR.md`.
+
 `--download` fetches four files into `~/.cache/lipsync` (or `$LIPSYNC_CACHE`):
 
 | File | What |
@@ -42,6 +48,22 @@ python -m lipsync.recognize --check
 
 Downloads are atomic — interrupted transfers cannot leave a truncated file that
 later looks like a valid cache hit.
+
+### If your network blocks the download
+
+Some networks deny `huggingface.co` outright. The CLI exits `4` and says so
+rather than failing obscurely. Fetch the four files above on a machine that can
+reach them and copy them into the cache, preserving the subdirectory names:
+
+```
+~/.cache/lipsync/LRS3_V_WER19.1/model.pth
+~/.cache/lipsync/LRS3_V_WER19.1/model.json
+~/.cache/lipsync/lm_en_subword/model.pth
+~/.cache/lipsync/lm_en_subword/model.json
+```
+
+Nothing re-downloads once those exist. Preprocessing and `--check-only` never
+need them.
 
 ## Why HuggingFace mirrors rather than the original links
 

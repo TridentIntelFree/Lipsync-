@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
             print(prepared.quality.summary())
         return 0 if prepared.quality.verdict is not Verdict.UNUSABLE else 2
 
+    from .assets import DownloadError
     from .recognize import BackendMissing, recognize
 
     try:
@@ -83,6 +84,16 @@ def main(argv: list[str] | None = None) -> int:
     except BackendMissing as exc:
         print(f"{exc}", file=sys.stderr)
         return 3
+    except DownloadError as exc:
+        print(f"Could not fetch the model weights.\n\n{exc}\n", file=sys.stderr)
+        print(
+            "If this network blocks the download, fetch the four files listed in "
+            "docs/RECOGNIZER.md on a machine that can reach them and copy them "
+            "into the cache directory shown above. Preprocessing and "
+            "--check-only work without them.",
+            file=sys.stderr,
+        )
+        return 4
     except ValueError as exc:
         print(f"{exc}", file=sys.stderr)
         print("\n" + prepared.quality.summary(), file=sys.stderr)

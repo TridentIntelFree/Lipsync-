@@ -113,13 +113,21 @@ def weights_present() -> bool:
 
 
 def _require_backend():
-    """Import the reference Auto-AVSR pipeline, or explain how to install it."""
+    """Check the recognition backend can be imported, or say what is missing.
+
+    The espnet subset ships with this package, so the only thing that can
+    actually be absent is PyTorch.
+    """
+    from .backend import _use_vendored_espnet
+
+    _use_vendored_espnet()
     try:
+        import torch  # noqa: F401
         from espnet.asr.asr_utils import torch_load  # noqa: F401
         from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E  # noqa: F401
     except ImportError as exc:
         raise BackendMissing(
-            "The recognition backend is not installed.\n\n"
+            f"The recognition backend is unavailable: {exc}\n\n"
             "Preprocessing (video -> aligned mouth ROIs) works without it; only "
             "the final video-to-text step needs it.\n\n"
             "  pip install -e '.[recognize]'\n\n"
