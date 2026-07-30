@@ -11,11 +11,14 @@ and — when it can — produces a transcript.
 lipsync talk.mp4
 ```
 
-**No computer? You do not need one.** Open
-[`notebooks/lipsync_colab.ipynb`](notebooks/lipsync_colab.ipynb) in Google Colab,
-tap *Runtime → Run all*, and the last cell prints a public link to a web app you
-can use from a phone — free, with the model running on Google's hardware. See
-[docs/RUNNING_WITHOUT_A_PC.md](docs/RUNNING_WITHOUT_A_PC.md).
+**No computer? You do not need one.** Two ways to run it from a phone:
+
+- **One permanent link** — deploy a Hugging Face Space by pasting three small
+  files in a browser. See [`deploy/huggingface/DEPLOY.md`](deploy/huggingface/DEPLOY.md).
+- **No setup** — open [`notebooks/lipsync_colab.ipynb`](notebooks/lipsync_colab.ipynb)
+  in Colab and tap *Runtime → Run all*.
+
+Both are covered in [docs/RUNNING_WITHOUT_A_PC.md](docs/RUNNING_WITHOUT_A_PC.md).
 
 ## Read this before you trust any output
 
@@ -198,7 +201,7 @@ which is why those values live in `constants.py` with their provenance recorded.
 
 ## Status
 
-`pytest` runs 68 tests. Verified:
+`pytest` runs 91 tests. Verified:
 
 - Decode and frame-rate resampling, on real generated video files.
 - Alignment recovers the canonical face layout under arbitrary rotation, scale
