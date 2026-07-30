@@ -1,0 +1,14 @@
+# Full runtime, including recognition. Used by Hugging Face Spaces and by
+# anyone who prefers requirements.txt to `pip install -e '.[recognize]'`.
+#
+# Deliberately no espnet: stock espnet has no 3D-convolution visual front end
+# and cannot load these checkpoints. The modified build that can is vendored in
+# lipsync/vendor/. See VENDOR.md.
+
+numpy>=1.24
+opencv-python-headless>=4.8
+mediapipe>=0.10
+imageio-ffmpeg>=0.4.9
+torch>=2.0
+torchaudio>=2.0
+gradio>=6.0

@@ -11,6 +11,12 @@ and — when it can — produces a transcript.
 lipsync talk.mp4
 ```
 
+**No computer? You do not need one.** Open
+[`notebooks/lipsync_colab.ipynb`](notebooks/lipsync_colab.ipynb) in Google Colab,
+tap *Runtime → Run all*, and the last cell prints a public link to a web app you
+can use from a phone — free, with the model running on Google's hardware. See
+[docs/RUNNING_WITHOUT_A_PC.md](docs/RUNNING_WITHOUT_A_PC.md).
+
 ## Read this before you trust any output
 
 Automated lip reading is much weaker than it looks in demos, and it fails in a
@@ -105,6 +111,17 @@ lipsync talk.mp4 --save-rois r.npy  # dump the aligned mouth crops
 Exit codes: `0` success, `2` input unusable, `3` backend not installed,
 `4` weights could not be downloaded.
 
+Or use the browser interface, which works from any device:
+
+```sh
+python app.py            # http://127.0.0.1:7860
+python app.py --share    # plus a public link, for use from a phone
+```
+
+It shows the aligned mouth crops the model actually receives alongside the
+transcript — if those are not centred on a mouth, the transcript is meaningless
+however convincing it reads.
+
 From Python:
 
 ```python
@@ -177,10 +194,11 @@ which is why those values live in `constants.py` with their provenance recorded.
 | `recognize.py` | Weight fetching, transcript plus caveat |
 | `backend.py` | Checkpoint loading and beam search |
 | `vendor/` | Modified espnet providing the visual front end (see `VENDOR.md`) |
+| `app.py` | Browser interface, usable from any device |
 
 ## Status
 
-`pytest` runs 59 tests. Verified:
+`pytest` runs 67 tests. Verified:
 
 - Decode and frame-rate resampling, on real generated video files.
 - Alignment recovers the canonical face layout under arbitrary rotation, scale
@@ -191,6 +209,8 @@ which is why those values live in `constants.py` with their provenance recorded.
 - The model contract: a real pipeline tensor flows through the vendored
   3D-conv/ResNet front end and the full Conformer encoder, emitting exactly one
   encoder step per video frame.
+- The web interface builds, serves over HTTP, and refuses to show a transcript
+  for footage that cannot support one.
 
 Not verified: **decoding weights into text.** The environment this was built in
 blocks `huggingface.co`, so the checkpoints were never downloaded and no actual

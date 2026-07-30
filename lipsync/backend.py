@@ -56,10 +56,15 @@ def _load_token_list(train_args) -> list[str]:
 class AutoAVSRRecognizer:
     """Visual speech recogniser over preprocessed mouth ROIs."""
 
-    def __init__(self, device: str = "cpu"):
+    def __init__(self, device: str | None = None):
         _use_vendored_espnet()
 
         import torch
+
+        # Beam search over a 5000-token vocabulary is the expensive part: minutes
+        # on CPU, seconds on a GPU. Use one when it is there.
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         from espnet.asr.asr_utils import get_model_conf, torch_load
         from espnet.nets.batch_beam_search import BatchBeamSearch
         from espnet.nets.lm_interface import dynamic_import_lm
