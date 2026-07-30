@@ -8,6 +8,8 @@ even when the weights are not available.
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import pytest
 
@@ -107,6 +109,42 @@ def test_compat_shims_behave_like_distutils():
     assert LooseVersion("1.2.0") >= LooseVersion("1.2")
     assert LooseVersion("1.3") > LooseVersion("1.2.9")
     assert not LooseVersion("1.1.0") >= LooseVersion("1.2.0")
+
+
+def test_backend_needs_neither_torchaudio_nor_matplotlib():
+    """Both were once thought required; neither is. Keep it that way.
+
+    Every extra install is another thing that can fail on someone's first run,
+    and these two are large. Stock espnet pulls in torchaudio and the vendored
+    plot module used to import matplotlib eagerly — this pins both out.
+    """
+    import builtins
+    import importlib
+
+    blocked = ("torchaudio", "matplotlib")
+    real_import = builtins.__import__
+
+    def guard(name, *args, **kwargs):
+        if name.split(".")[0] in blocked:
+            raise ImportError(f"{name} is blocked by this test")
+        return real_import(name, *args, **kwargs)
+
+    modules = [
+        "espnet.nets.pytorch_backend.e2e_asr_transformer",
+        "espnet.nets.batch_beam_search",
+        "espnet.nets.lm_interface",
+        "espnet.nets.scorers.length_bonus",
+        "espnet.asr.asr_utils",
+    ]
+    for name in modules:
+        sys.modules.pop(name, None)
+
+    builtins.__import__ = guard
+    try:
+        for name in modules:
+            importlib.import_module(name)
+    finally:
+        builtins.__import__ = real_import
 
 
 def test_vendored_tree_does_not_import_distutils():

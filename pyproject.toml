@@ -27,7 +27,6 @@ dependencies = [
 # docs/RECOGNIZER.md.
 recognize = [
     "torch>=2.0",
-    "torchaudio>=2.0",
 ]
 dev = [
     "pytest>=7.4",

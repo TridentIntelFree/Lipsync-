@@ -198,7 +198,7 @@ which is why those values live in `constants.py` with their provenance recorded.
 
 ## Status
 
-`pytest` runs 67 tests. Verified:
+`pytest` runs 68 tests. Verified:
 
 - Decode and frame-rate resampling, on real generated video files.
 - Alignment recovers the canonical face layout under arbitrary rotation, scale
