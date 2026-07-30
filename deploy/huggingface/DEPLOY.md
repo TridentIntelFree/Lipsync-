@@ -8,10 +8,20 @@ small files; the Space clones the code from GitHub itself on startup.
 
 ## Steps
 
-1. Go to **huggingface.co/new-space** (sign in — you already have an account).
+1. Sign in at **https://huggingface.co**, then either:
+   - tap your **profile picture** (top right) and choose **+ New Space**, or
+   - go to **https://huggingface.co/spaces** and tap **Create new Space**.
+
+   Use the UI route rather than a direct `/new-space` style URL — the menu entry
+   is what Hugging Face documents, and it does not break when they move things.
 2. **Name** it `lipsync`. **SDK**: choose **Gradio**.
 3. **Hardware**: pick the free option offered. If the only free choice is
    **ZeroGPU**, take it — the app already handles it.
+
+   Hugging Face's own docs say Gradio Spaces "require a paid plan to create:
+   PRO for personal accounts". Free accounts reportedly still get a couple of
+   ZeroGPU Gradio Spaces. If you hit a paywall here, stop and use the Colab
+   notebook instead — see the last section.
 4. Create the Space. It opens on the **Files** tab.
 5. You only need to touch **two files**. The `README.md` that Hugging Face
    generates from the creation form is already correct — leave it alone.
