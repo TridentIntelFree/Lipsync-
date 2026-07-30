@@ -30,6 +30,30 @@ Worth knowing:
 - The first run takes a few minutes — installing, then a 1 GB model download.
 - Colab disconnects after roughly 90 minutes of inactivity, and the link dies
   with it. Re-run the notebook for a fresh one. Nothing is lost.
+
+### Where the model actually lives
+
+**Not on your phone.** It is downloaded by whatever machine runs the notebook,
+and your device only ever loads a web page. Nothing is stored locally and there
+is nothing to clear.
+
+Colab wipes its own disk between sessions, so by default the model re-downloads
+each time you return. The notebook avoids that by mounting Google Drive and
+caching there — first run downloads it, later runs load it in seconds. It costs
+about 1 GB of the free 15 GB, and Colab will ask permission the first time.
+
+Set `USE_DRIVE = False` in the notebook to skip Drive entirely. Everything still
+works; startup is just slower.
+
+The mechanism is the `LIPSYNC_CACHE` environment variable, which points the cache
+anywhere you like:
+
+```sh
+LIPSYNC_CACHE=/mnt/big-disk/lipsync lipsync talk.mp4
+```
+
+Anything already at that path is used as-is and never re-downloaded, so you can
+also place the four files there by hand.
 - The free tier gives somewhere around 15–30 GPU hours a week, which is far more
   than this needs. If no GPU is available it still runs on CPU, just slowly.
 - Set the runtime to GPU under **Runtime → Change runtime type → T4 GPU** if it
