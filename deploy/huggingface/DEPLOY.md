@@ -13,15 +13,22 @@ small files; the Space clones the code from GitHub itself on startup.
 3. **Hardware**: pick the free option offered. If the only free choice is
    **ZeroGPU**, take it — the app already handles it.
 4. Create the Space. It opens on the **Files** tab.
-5. Create or edit these three files, pasting the contents from this folder:
+5. You only need to touch **two files**. The `README.md` that Hugging Face
+   generates from the creation form is already correct — leave it alone.
 
-   | File | Paste from |
-   | --- | --- |
-   | `app.py` | [`app.py`](app.py) — about 30 lines |
-   | `requirements.txt` | [`requirements.txt`](requirements.txt) |
-   | `README.md` | [`README.md`](README.md) — the `---` block at the top matters |
+   | File | What to do | Paste from |
+   | --- | --- | --- |
+   | `app.py` | already exists — replace its contents | [`app.py`](app.py), about 30 lines |
+   | `requirements.txt` | create it | [`requirements.txt`](requirements.txt) |
 
-   Use **Files → + Add file → Create a new file**, paste, then **Commit**.
+   To edit `app.py`: tap it in the Files list, then the pencil icon, select all,
+   paste, **Commit**. To create `requirements.txt`: **Files → + Add file →
+   Create a new file**, name it, paste, **Commit**.
+
+   A copy of `README.md` is in this folder for reference, but you should not
+   need it. Note that `requirements.txt` deliberately does not list `gradio` —
+   Spaces installs that from `sdk_version` in the README, and pinning it in both
+   places causes build conflicts.
 
 6. The Space builds itself. First build takes a few minutes. When it says
    *Running*, your link is live:

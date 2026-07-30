@@ -1,7 +1,15 @@
+# Deliberately no gradio: Spaces installs it from `sdk_version` in README.md,
+# and pinning it here fights that.
+#
+# Also no espnet: stock espnet has no 3D-convolution visual front end and cannot
+# load these checkpoints. The build that can is vendored in the cloned repo.
 numpy>=1.24
 opencv-python-headless>=4.8
 mediapipe>=0.10
 imageio-ffmpeg>=0.4.9
 torch>=2.0
-gradio>=6.0
 yt-dlp>=2024.1.1
+
+# Needed only on ZeroGPU hardware, harmless elsewhere. app.py treats it as
+# optional, but ZeroGPU Spaces require it to allocate a GPU.
+spaces
