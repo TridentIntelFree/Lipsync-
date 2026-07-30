@@ -1,0 +1,106 @@
+# The recognition backend
+
+Preprocessing is self-contained. Recognition is not: it needs a large pretrained
+model, and that model comes with terms this project cannot change. That is why
+it is a separate install step rather than a default dependency.
+
+## What the model is
+
+Auto-AVSR, the visual-only checkpoint, from *Visual Speech Recognition for
+Multiple Languages* and *Auto-AVSR: Audio-Visual Speech Recognition with
+Automatic Labels* (Pingchuan Ma et al., Imperial College London).
+
+| | |
+| --- | --- |
+| Front end | 3D convolution + ResNet-18 over 88×88 grayscale mouth crops |
+| Encoder | Conformer |
+| Decoder | Transformer, joint CTC/attention beam search |
+| Language model | Subword RNN LM, 5000-token unigram vocabulary |
+| Training data | LRS3 (+ LRS2, VoxCeleb2 for the larger variants) |
+| Reported | 19.1% WER on LRS3 |
+| Size | ~891 MB model + ~130 MB language model |
+
+Decoding parameters — beam size 40, CTC weight 0.1, LM weight 0.6 — match the
+reference configuration and live in `recognize.py`.
+
+## Installing
+
+```sh
+pip install -e '.[recognize]'
+python -m lipsync.recognize --download
+python -m lipsync.recognize --check
+```
+
+`--download` fetches four files into `~/.cache/lipsync` (or `$LIPSYNC_CACHE`):
+
+| File | What |
+| --- | --- |
+| `LRS3_V_WER19.1/model.pth` | Visual speech recognition weights |
+| `LRS3_V_WER19.1/model.json` | Its training configuration |
+| `lm_en_subword/model.pth` | Language model weights |
+| `lm_en_subword/model.json` | Its configuration |
+
+Downloads are atomic — interrupted transfers cannot leave a truncated file that
+later looks like a valid cache hit.
+
+## Why HuggingFace mirrors rather than the original links
+
+Upstream hosts these on Google Drive, which requires a Google session and serves
+an interstitial for large files. The HuggingFace copies are the same weights over
+plain HTTPS with no account, which is what "minimal signups" needs. If you would
+rather use the originals, download them from the upstream model zoo and place
+them at the paths above; nothing else changes.
+
+## Licence
+
+**Non-commercial use only.** The checkpoints inherit terms from the datasets they
+were trained on (LRS2/LRS3 are licensed from the BBC for research use). The
+upstream repository states its models are for non-commercial purposes and that
+its code may be used for comparative or benchmarking purposes.
+
+This is a real constraint, not boilerplate. If you need commercial use you need
+different weights — trained on data you have rights to — and this project's
+preprocessing will feed them unchanged, provided they expect the same 88×88
+normalised mouth crops.
+
+The MIT licence on *this* repository covers the code here, not the weights.
+
+## Cost of running
+
+CPU-only, single-threaded beam search dominates: on the order of minutes for a
+few seconds of video. The 40-wide beam over a 5000-token vocabulary is the
+expensive part. A CUDA GPU changes this substantially; set `device="cuda"` when
+constructing `AutoAVSRRecognizer`.
+
+Memory: roughly 2–3 GB resident with both models loaded. Loading is expensive, so
+reuse one `AutoAVSRRecognizer` across videos rather than constructing per call.
+
+## Swapping in a different model
+
+The boundary is `pipeline.to_model_tensor`, which returns `(1, T, 88, 88)`
+float32 normalised with mean 0.421 and standard deviation 0.165. Any model
+expecting that layout drops in by replacing `backend.AutoAVSRRecognizer` with
+something exposing the same `transcribe(tensor) -> str`.
+
+If a replacement model was trained with different preprocessing — a different
+reference face, crop size or normalisation — then `constants.py` has to change
+with it. Those constants are a contract with the specific checkpoint; mismatches
+lower accuracy silently rather than failing loudly.
+
+## Newer models worth tracking
+
+The field moves fast and the numbers below are benchmark figures on clean data,
+subject to every caveat in the README:
+
+- **VALLR** (ICCV 2025) — 18.7% WER on LRS3, predicting phonemes then
+  reconstructing text with a fine-tuned LLM. Notably data-efficient: 30 hours of
+  labelled video against the thousands used here.
+- **Diffusion LLM VSR** — 19.5% WER on LRS3.
+- **ViSPer** (`tiiuae/visper`) — multilingual audio-visual, worth a look if you
+  need languages beyond English.
+
+The phoneme-then-LLM shape of VALLR is a better fit for this project's honesty
+goals than a single end-to-end decoder, because the intermediate phoneme sequence
+is inspectable: you can see what the *visual* stage actually recovered before the
+language model smooths it into fluent English. Worth evaluating as a second
+backend.

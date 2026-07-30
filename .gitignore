@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Model weights and downloaded assets — fetched on demand, never committed
+*.pth
+*.tflite
+*.task
+
+# Local scratch
+*.npy
+!lipsync/tokens/*

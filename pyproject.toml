@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lipsync"
+version = "0.1.0"
+description = "Infer speech from silent video of a speaking face"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# Preprocessing only. Deliberately light: this half runs anywhere, and is
+# useful on its own for producing aligned mouth crops.
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "mediapipe>=0.10",
+    "imageio-ffmpeg>=0.4.9",
+]
+
+[project.optional-dependencies]
+# The recognition backend. Heavy, and the checkpoints it downloads are released
+# for non-commercial use — see docs/RECOGNIZER.md.
+recognize = [
+    "torch>=2.0",
+    "espnet>=202301",
+    "sentencepiece>=0.1.99",
+]
+dev = [
+    "pytest>=7.4",
+]
+
+[project.scripts]
+lipsync = "lipsync.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lipsync*"]
+
+[tool.setuptools.package-data]
+lipsync = ["tokens/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
