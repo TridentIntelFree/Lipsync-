@@ -61,3 +61,7 @@ jobs:
 
       - name: Run the whole pipeline, weights included
         run: python scripts/verify_model.py
+
+      # The only measurement that says whether this tool is worth having.
+      - name: Measure accuracy against known sentences
+        run: python scripts/measure_accuracy.py

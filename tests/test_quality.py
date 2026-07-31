@@ -38,7 +38,7 @@ def sharp_rois(count: int = 30) -> np.ndarray:
     base = rng.integers(40, 200, (96, 96), dtype=np.uint8)
     rois = np.repeat(base[None, :, :], count, axis=0).copy()
     for i in range(count):
-        opening = int(10 * (1 + np.sin(i * 0.7)) / 2) + 1
+        opening = int(14 * (1 + np.sin(i * 0.7)) / 2) + 1
         cv2.ellipse(rois[i], (48, 66), (16, opening), 0, 0, 360, 30, -1)
     return rois
 
@@ -135,18 +135,27 @@ def test_summary_names_every_check():
 # sentence instead. These tests cover the check that refuses such footage.
 
 
-def static_rois(count=40, seed=0):
-    """A face that does not move: one frame, plus noise affecting all of it."""
+def static_rois(count=40, seed=0, noise=1.0):
+    """A face that does not move: one frame, plus sensor noise.
+
+    Tuned to score like real still footage (~0.03 against a measured 0.055 for
+    an actual still photograph), so the thresholds are exercised where they
+    matter rather than at values no real video produces.
+    """
     rng = np.random.default_rng(seed)
     base = rng.integers(60, 190, (96, 96), dtype=np.uint8)
     return np.clip(
-        base.astype(np.int16)[None, :, :] + rng.normal(0, 3, (count, 96, 96)),
+        base.astype(np.int16)[None, :, :] + rng.normal(0, noise, (count, 96, 96)),
         0, 255,
     ).astype(np.uint8)
 
 
-def moving_mouth_rois(count=40, amplitude=10, seed=0):
-    """The same face, with the mouth region opening and closing."""
+def moving_mouth_rois(count=40, amplitude=14, seed=0):
+    """The same face with the mouth opening and closing.
+
+    amplitude=14 scores ~0.167, inside the 0.114-0.200 band measured on real
+    CREMA-D clips of actors speaking.
+    """
     import cv2
 
     rois = static_rois(count, seed).copy()
@@ -171,19 +180,17 @@ def test_a_moving_mouth_passes():
 
 
 def test_barely_moving_is_flagged_but_not_refused():
-    report = assess(MODEL_FPS, [face()] * 40, moving_mouth_rois(amplitude=2))
+    report = assess(MODEL_FPS, [face()] * 40, moving_mouth_rois(amplitude=5))
     assert find(report, "mouth movement").verdict in (Verdict.MARGINAL, Verdict.UNUSABLE)
 
 
-def test_motion_measure_ignores_overall_noise_level():
-    """Noise hits mouth and upper face alike, so the ratio must not track it."""
+def test_motion_measure_is_scaled_by_contrast_not_brightness():
+    """Halving the contrast of the same motion must not change the verdict."""
     from lipsync.quality import mouth_motion_ratio
 
-    quiet = mouth_motion_ratio(static_rois(seed=1))
-    rng = np.random.default_rng(2)
-    noisy = static_rois(seed=1).astype(np.int16) + rng.normal(0, 25, (40, 96, 96))
-    noisy = np.clip(noisy, 0, 255).astype(np.uint8)
-    assert abs(mouth_motion_ratio(noisy) - quiet) < 0.6
+    bright = moving_mouth_rois()
+    dim = (bright.astype(np.float32) * 0.5 + 60).astype(np.uint8)
+    assert abs(mouth_motion_ratio(dim) - mouth_motion_ratio(bright)) < 0.05
 
 
 def test_motion_measure_needs_several_frames():

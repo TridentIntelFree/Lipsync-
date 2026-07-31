@@ -28,17 +28,24 @@ REFERENCE_INTEROCULAR = float(
     np.linalg.norm(STABLE_REFERENCE[1] - STABLE_REFERENCE[0])
 )
 
-# Regions of the aligned 96x96 mouth crop, used to tell speech from stillness.
-# The mouth moves during speech; the nose bridge above it does not. Comparing the
-# two makes the measure independent of camera noise, compression and head motion,
-# all of which affect both bands equally.
+# The mouth region of the aligned 96x96 crop, where speech shows up.
 _MOUTH_BAND = (slice(48, 88), slice(20, 76))
-_UPPER_BAND = (slice(0, 30), slice(20, 76))
 
-# Below this the mouth moves no more than the rest of the face — there is no
-# speech in the footage, whatever else is true of it.
-MOTION_UNUSABLE = 1.15
-MOTION_MARGINAL = 1.60
+# Thresholds on frame-to-frame change in that region, divided by the crop's own
+# pixel contrast so the measure does not track exposure, skin tone or codec.
+#
+# Calibrated against real footage, not intuition. On seven CREMA-D clips of
+# actors speaking known sentences the value ranges 0.114–0.200; on a still
+# photograph it is 0.055, and on a frozen frame 0.000. The thresholds sit in
+# the gap between those.
+#
+# An earlier version compared the mouth against the nose bridge above it, on the
+# theory that the upper face holds still during speech. Real footage disproved
+# it: that ratio ran as low as 0.94 on genuine speech against 0.88 on the still
+# photograph — a 1.07x margin, which would have rejected real speakers. The
+# nose and upper lip move more than expected once the crop is tight on the mouth.
+MOTION_UNUSABLE = 0.075
+MOTION_MARGINAL = 0.105
 
 
 class Verdict(str, Enum):
@@ -111,25 +118,30 @@ def _roll_degrees(keypoints: np.ndarray) -> float:
 
 
 def mouth_motion_ratio(mouth_rois: np.ndarray) -> float:
-    """How much the mouth moves, relative to a part of the face that should not.
+    """How much the mouth moves, scaled by the crop's own contrast.
 
     The recogniser has no way to report "nothing was said" — it was trained only
     on footage where someone is always speaking, so a motionless mouth makes it
     emit its most likely sentence instead. Nothing in that output marks it as
     invention, which makes it the most misleading thing this tool can produce.
+    This is the check that catches it.
 
-    This is the check that catches it. A ratio near or below 1 means the mouth
-    region changes no more than the nose bridge above it: whatever motion exists
-    is camera noise or head movement, not speech. Real speech moves the mouth
-    several times more than the upper face.
+    Dividing by contrast rather than by another part of the face is what makes
+    the measure transfer: it cancels exposure, skin tone and codec differences,
+    while a frozen or barely-moving mouth still lands near zero.
+
+    The separation is real but not enormous — roughly 2x between the quietest
+    real speech measured and the loudest still image. It reliably catches frozen
+    footage; it will not catch a speaker who barely opens their mouth.
     """
     if mouth_rois is None or len(mouth_rois) < 3:
         return 0.0
 
     frames = mouth_rois.astype(np.float32)
-    mouth = np.abs(np.diff(frames[:, _MOUTH_BAND[0], _MOUTH_BAND[1]], axis=0)).mean()
-    upper = np.abs(np.diff(frames[:, _UPPER_BAND[0], _UPPER_BAND[1]], axis=0)).mean()
-    return float(mouth / max(upper, 1e-6))
+    mouth = frames[:, _MOUTH_BAND[0], _MOUTH_BAND[1]]
+    movement = np.abs(np.diff(mouth, axis=0)).mean()
+    contrast = frames.std()
+    return float(movement / max(contrast, 1e-6))
 
 
 def assess(
