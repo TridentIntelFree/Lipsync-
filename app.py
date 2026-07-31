@@ -32,16 +32,18 @@ from lipsync.assets import DownloadError
 from lipsync.quality import Verdict
 from lipsync.segments import DEFAULT_SEGMENT_SECONDS
 
-# Hugging Face's free tier hands out a GPU only for the duration of a decorated
-# call. The decorator is a no-op everywhere else, so this stays a single app.
-try:  # pragma: no cover - depends on the host
-    import spaces
-
-    gpu_task = spaces.GPU(duration=180)
-except Exception:  # pragma: no cover
-
-    def gpu_task(fn):
-        return fn
+# Deliberately no spaces.GPU decorator.
+#
+# On Hugging Face's free tier a GPU is allocated for the whole duration of a
+# decorated call, and free accounts get only minutes per day. Wrapping this
+# function spent that quota on video download, decoding, face detection, a ~1 GB
+# model download and model loading — none of which touch a GPU. One 30-second
+# clip could exhaust a day's allowance.
+#
+# Recognition itself is about 7 seconds per short clip on CPU, so the whole
+# pipeline runs on CPU without a quota, without a paywall, and without the
+# allocation dance. AutoAVSRRecognizer still picks up CUDA automatically where
+# a real GPU exists.
 
 
 _VERDICT_STYLE = {
@@ -198,7 +200,6 @@ def _blank(message: str):
 # --------------------------------------------------------------------------
 
 
-@gpu_task
 def run(
     video_path: str | None,
     url: str,
