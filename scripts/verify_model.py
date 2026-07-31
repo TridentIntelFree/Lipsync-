@@ -4,10 +4,13 @@ This exists because the environment the project was written in cannot reach
 huggingface.co, so the final step — turning mouth crops into words — was never
 executed there. CI can reach it, so CI is where that claim gets tested.
 
-It checks that the model loads, that a real video flows through it end to end,
-and that a transcript comes out. It does **not** check accuracy: the test clip is
-a still photograph with synthetic motion, so whatever text appears is meaningless
-as a reading. Plumbing is the point.
+It checks three things: that the model loads and decodes end to end, that it
+confabulates a confident sentence when handed footage containing no speech, and
+that the quality gate refuses such footage before that can reach anyone.
+
+It does not check accuracy. The clip is a still photograph, so there is nothing
+to be accurate about — measuring that needs footage with a known transcript, and
+the dashboard does it for any video that has captions.
 
 Exits non-zero on failure, so the workflow goes red rather than quietly passing.
 """
@@ -92,6 +95,7 @@ def main() -> int:
 
     step("Preprocessing: decode, detect, align, quality")
     import lipsync
+    from lipsync.quality import Verdict
 
     prepared = lipsync.prepare(str(clip))
     print(f"    {len(prepared.mouth_rois)} mouth crops, "
@@ -99,6 +103,28 @@ def main() -> int:
     print("    " + prepared.quality.summary().replace("\n", "\n    "))
     if len(prepared.mouth_rois) == 0:
         print("FAIL: no mouth crops produced")
+        return 1
+
+    step("The gate must refuse this clip: it is a still photograph")
+    if prepared.quality.verdict is not Verdict.UNUSABLE:
+        print("FAIL: a motionless mouth was not refused")
+        return 1
+    movement = next(
+        (c for c in prepared.quality.checks if c.name == "mouth movement"), None
+    )
+    if movement is None or movement.verdict is not Verdict.UNUSABLE:
+        print("FAIL: the mouth-movement check did not fire")
+        return 1
+    print(f"    refused: {movement.message}")
+
+    from lipsync.recognize import recognize
+
+    try:
+        recognize(prepared)
+    except ValueError as exc:
+        print(f"    recognize() refused as well: {str(exc)[:90]}...")
+    else:
+        print("FAIL: recognize() transcribed footage with no speech in it")
         return 1
 
     step("Loading the recogniser")
@@ -109,7 +135,7 @@ def main() -> int:
     print(f"    loaded in {time.time() - started:.0f}s on {recogniser.device}")
     print(f"    vocabulary: {len(recogniser.token_list)} tokens")
 
-    step("Running recognition")
+    step("Overriding the gate, to record what it would have said")
     started = time.time()
     from lipsync.recognize import to_backend_tensor
 
@@ -119,19 +145,22 @@ def main() -> int:
     print(f"    took {time.time() - started:.0f}s")
 
     print("\n" + "=" * 62)
-    print(f"TRANSCRIPT: {text!r}")
+    print(f"WOULD HAVE SAID: {text!r}")
     print("=" * 62)
     print(
-        "\nThe clip is a still photograph with synthetic motion, so the text\n"
-        "above is not a reading of anything and its content means nothing.\n"
-        "What this proves is that weights load and decoding runs end to end."
+        "\nThat is what the recogniser produces from a still photograph, with\n"
+        "the gate overridden. There is no speech in the clip — the mouth never\n"
+        "moves — and nothing in that sentence marks it as invention. It is the\n"
+        "reason the gate exists, and why it refused this clip above.\n"
+        "\nThis run proves three things: the weights load and decode end to end,\n"
+        "the model confabulates when given nothing, and the gate catches it."
     )
 
     if not isinstance(text, str):
         print("\nFAIL: recogniser did not return a string")
         return 1
 
-    print("\nPASS: the full pipeline executed, weights included.")
+    print("\nPASS: pipeline executes, and refuses footage with no speech in it.")
     return 0
 
 

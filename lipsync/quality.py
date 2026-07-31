@@ -28,6 +28,18 @@ REFERENCE_INTEROCULAR = float(
     np.linalg.norm(STABLE_REFERENCE[1] - STABLE_REFERENCE[0])
 )
 
+# Regions of the aligned 96x96 mouth crop, used to tell speech from stillness.
+# The mouth moves during speech; the nose bridge above it does not. Comparing the
+# two makes the measure independent of camera noise, compression and head motion,
+# all of which affect both bands equally.
+_MOUTH_BAND = (slice(48, 88), slice(20, 76))
+_UPPER_BAND = (slice(0, 30), slice(20, 76))
+
+# Below this the mouth moves no more than the rest of the face — there is no
+# speech in the footage, whatever else is true of it.
+MOTION_UNUSABLE = 1.15
+MOTION_MARGINAL = 1.60
+
 
 class Verdict(str, Enum):
     """How much to trust anything produced from this video."""
@@ -96,6 +108,28 @@ def _yaw_ratio(keypoints: np.ndarray) -> float:
 def _roll_degrees(keypoints: np.ndarray) -> float:
     delta = keypoints[1] - keypoints[0]
     return float(abs(np.degrees(np.arctan2(delta[1], delta[0]))))
+
+
+def mouth_motion_ratio(mouth_rois: np.ndarray) -> float:
+    """How much the mouth moves, relative to a part of the face that should not.
+
+    The recogniser has no way to report "nothing was said" — it was trained only
+    on footage where someone is always speaking, so a motionless mouth makes it
+    emit its most likely sentence instead. Nothing in that output marks it as
+    invention, which makes it the most misleading thing this tool can produce.
+
+    This is the check that catches it. A ratio near or below 1 means the mouth
+    region changes no more than the nose bridge above it: whatever motion exists
+    is camera noise or head movement, not speech. Real speech moves the mouth
+    several times more than the upper face.
+    """
+    if mouth_rois is None or len(mouth_rois) < 3:
+        return 0.0
+
+    frames = mouth_rois.astype(np.float32)
+    mouth = np.abs(np.diff(frames[:, _MOUTH_BAND[0], _MOUTH_BAND[1]], axis=0)).mean()
+    upper = np.abs(np.diff(frames[:, _UPPER_BAND[0], _UPPER_BAND[1]], axis=0)).mean()
+    return float(mouth / max(upper, 1e-6))
 
 
 def assess(
@@ -197,6 +231,24 @@ def assess(
             + ("; alignment corrects this but crops more background" if roll > 30 else ""),
         )
     )
+
+    # --- Is the mouth actually moving? ---
+    if mouth_rois is not None and len(mouth_rois) >= 3:
+        motion = mouth_motion_ratio(mouth_rois)
+        if motion < MOTION_UNUSABLE:
+            verdict, msg = Verdict.UNUSABLE, (
+                f"the mouth barely moves (ratio {motion:.2f}); this footage "
+                "contains no speech to read, and the model would return a "
+                "confident sentence anyway"
+            )
+        elif motion < MOTION_MARGINAL:
+            verdict, msg = Verdict.MARGINAL, (
+                f"very little mouth movement (ratio {motion:.2f}); this may be "
+                "a silent pause rather than speech"
+            )
+        else:
+            verdict, msg = Verdict.GOOD, f"mouth is moving (ratio {motion:.2f})"
+        checks.append(Check("mouth movement", verdict, motion, msg))
 
     # --- Sharpness of the actual mouth region ---
     if mouth_rois is not None and len(mouth_rois):

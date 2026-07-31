@@ -56,8 +56,28 @@ because the footage genuinely is clean. It simply contains no speech. The model
 had nothing and returned a confident sentence regardless, and nothing in the
 output marks it as invention.
 
-That is the honest baseline for reading anything this tool produces. Reproduce it
-with `python scripts/verify_model.py`.
+The model has no way to report "nothing was said". It was trained only on
+footage where someone is always speaking, so it has no such output — given a
+motionless mouth it returns its most likely sentence instead.
+
+**This footage is now refused.** A check measures how much the mouth moves
+relative to the nose bridge above it, which does not move during speech. That
+ratio is independent of camera noise, compression and head motion, since those
+affect both regions equally. The still clip scores 0.88 — the mouth moves
+*less* than the rest of the face — against 1.7 or more for even subtle speech:
+
+```
+Input quality: UNUSABLE
+  [ok  ] face detection: face found in 100% of frames
+  [ok  ] face size: 109px between the eyes
+  [FAIL] mouth movement: the mouth barely moves (ratio 0.88); this footage
+         contains no speech to read, and the model would return a confident
+         sentence anyway
+```
+
+CI asserts both halves on every push: that the model still confabulates when
+the gate is overridden, and that the gate refuses the clip when it is not.
+Reproduce with `python scripts/verify_model.py`.
 
 So: this is a tool for generating *hypotheses* about what someone might have
 said. It is not a transcript in the sense that an audio transcript is, and a

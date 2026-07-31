@@ -26,8 +26,21 @@ def face(interocular: float = REFERENCE_INTEROCULAR, yaw: float = 0.0) -> np.nda
 
 
 def sharp_rois(count: int = 30) -> np.ndarray:
+    """Sharp, well-exposed footage of a mouth that is actually speaking.
+
+    A coherent face with a moving mouth, not per-frame noise: noise varies the
+    mouth and the upper face equally, which is precisely what the movement check
+    treats as "nothing is being said".
+    """
+    import cv2
+
     rng = np.random.default_rng(1)
-    return rng.integers(40, 200, (count, 96, 96), dtype=np.uint8)
+    base = rng.integers(40, 200, (96, 96), dtype=np.uint8)
+    rois = np.repeat(base[None, :, :], count, axis=0).copy()
+    for i in range(count):
+        opening = int(10 * (1 + np.sin(i * 0.7)) / 2) + 1
+        cv2.ellipse(rois[i], (48, 66), (16, opening), 0, 0, 360, 30, -1)
+    return rois
 
 
 def find(report, name):
@@ -113,3 +126,76 @@ def test_summary_names_every_check():
     text = report.summary()
     for check in report.checks:
         assert check.name in text
+
+
+# --- mouth movement -----------------------------------------------------
+#
+# The recogniser cannot say "nothing was said": trained only on footage where
+# someone is always speaking, a motionless mouth makes it emit its most likely
+# sentence instead. These tests cover the check that refuses such footage.
+
+
+def static_rois(count=40, seed=0):
+    """A face that does not move: one frame, plus noise affecting all of it."""
+    rng = np.random.default_rng(seed)
+    base = rng.integers(60, 190, (96, 96), dtype=np.uint8)
+    return np.clip(
+        base.astype(np.int16)[None, :, :] + rng.normal(0, 3, (count, 96, 96)),
+        0, 255,
+    ).astype(np.uint8)
+
+
+def moving_mouth_rois(count=40, amplitude=10, seed=0):
+    """The same face, with the mouth region opening and closing."""
+    import cv2
+
+    rois = static_rois(count, seed).copy()
+    for i in range(count):
+        opening = int(amplitude * (1 + np.sin(i * 0.7)) / 2) + 1
+        cv2.ellipse(rois[i], (48, 66), (16, opening), 0, 0, 360, 30, -1)
+    return rois
+
+
+def test_a_motionless_mouth_is_unusable():
+    """The still-image confabulation this project ships as its cautionary example."""
+    report = assess(MODEL_FPS, [face()] * 40, static_rois())
+    check = find(report, "mouth movement")
+    assert check.verdict is Verdict.UNUSABLE
+    assert "no speech" in check.message
+    assert report.verdict is Verdict.UNUSABLE
+
+
+def test_a_moving_mouth_passes():
+    report = assess(MODEL_FPS, [face()] * 40, moving_mouth_rois())
+    assert find(report, "mouth movement").verdict is Verdict.GOOD
+
+
+def test_barely_moving_is_flagged_but_not_refused():
+    report = assess(MODEL_FPS, [face()] * 40, moving_mouth_rois(amplitude=2))
+    assert find(report, "mouth movement").verdict in (Verdict.MARGINAL, Verdict.UNUSABLE)
+
+
+def test_motion_measure_ignores_overall_noise_level():
+    """Noise hits mouth and upper face alike, so the ratio must not track it."""
+    from lipsync.quality import mouth_motion_ratio
+
+    quiet = mouth_motion_ratio(static_rois(seed=1))
+    rng = np.random.default_rng(2)
+    noisy = static_rois(seed=1).astype(np.int16) + rng.normal(0, 25, (40, 96, 96))
+    noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+    assert abs(mouth_motion_ratio(noisy) - quiet) < 0.6
+
+
+def test_motion_measure_needs_several_frames():
+    from lipsync.quality import mouth_motion_ratio
+
+    assert mouth_motion_ratio(np.zeros((1, 96, 96), np.uint8)) == 0.0
+    assert mouth_motion_ratio(None) == 0.0
+
+
+def test_a_perfectly_clean_still_is_still_refused():
+    """Every other check passing must not rescue footage with no speech in it."""
+    report = assess(MODEL_FPS, [face()] * 40, static_rois())
+    passing = [c.name for c in report.checks if c.verdict is Verdict.GOOD]
+    assert "face detection" in passing and "face size" in passing
+    assert report.verdict is Verdict.UNUSABLE
