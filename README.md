@@ -43,6 +43,22 @@ output is always fluent, always grammatical, and always confident — whether th
 model read the lips correctly or invented the whole thing. Fluency here is not
 evidence of accuracy. It is what the system does when it has nothing.
 
+Here is that failure, measured rather than asserted. CI feeds the model a clip
+built from **a single still photograph**, panned and rotated so the alignment has
+work to do. The mouth never moves. There is no speech in it at all:
+
+```
+TRANSCRIPT: "THAT'S WHAT I'M GOING TO DO"
+```
+
+Every quality check passed — 100% face detection, good lighting, sharp, frontal —
+because the footage genuinely is clean. It simply contains no speech. The model
+had nothing and returned a confident sentence regardless, and nothing in the
+output marks it as invention.
+
+That is the honest baseline for reading anything this tool produces. Reproduce it
+with `python scripts/verify_model.py`.
+
 So: this is a tool for generating *hypotheses* about what someone might have
 said. It is not a transcript in the sense that an audio transcript is, and a
 result from it should never be used to claim a specific person said a specific
@@ -223,10 +239,16 @@ which is why those values live in `constants.py` with their provenance recorded.
 - The web interface builds, serves over HTTP, and refuses to show a transcript
   for footage that cannot support one.
 
-Not verified: **decoding weights into text.** The environment this was built in
-blocks `huggingface.co`, so the checkpoints were never downloaded and no actual
-transcript has been produced. Everything up to and including the encoder's
-shape contract is exercised; the beam search over real weights is not.
+- **The full pipeline including weights**, in CI. GitHub's runners can reach
+  `huggingface.co` even though the development environment cannot, so
+  `.github/workflows/verify-model.yml` downloads the real checkpoints and runs
+  a clip end to end on every push. Observed: 1002 MB visual model and 215 MB
+  language model fetched, 50 mouth crops at 100% detection, recogniser loaded
+  in 3s, decode in 7s, transcript returned.
+
+Nothing is now unverified except accuracy itself, which cannot be measured
+without labelled footage. Point the dashboard at a video that has captions and
+it will measure the error rate for you.
 
 The backend is a thin wrapper over the reference implementation rather than a
 re-implementation, deliberately — a hand-written Conformer that merely loaded
@@ -258,8 +280,10 @@ ignored.
 
 No timing information — output is text, not timestamped captions.
 
-CPU inference is slow: expect minutes, not seconds, for a short clip. The beam
-search dominates.
+Recognition itself is quicker than expected: about 7 seconds on a plain CI CPU
+for a 2-second clip, with the model loading in 3. The slow part is the one-off
+~1.2 GB weight download, which took 32 minutes on that runner. Once cached,
+runs are fast.
 
 And, again: this produces guesses that read as certainties. Anyone using the
 output should be told that, not just the person running it.

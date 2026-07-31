@@ -18,7 +18,7 @@ Automatic Labels* (Pingchuan Ma et al., Imperial College London).
 | Language model | Subword RNN LM, 5000-token unigram vocabulary |
 | Training data | LRS3 (+ LRS2, VoxCeleb2 for the larger variants) |
 | Reported | 19.1% WER on LRS3 |
-| Size | ~891 MB model + ~130 MB language model |
+| Size | 1002 MB model + 215 MB language model (measured) |
 
 Decoding parameters — beam size 40, CTC weight 0.1, LM weight 0.6 — match the
 reference configuration and live in `recognize.py`.
@@ -31,7 +31,7 @@ python -m lipsync.recognize --download
 python -m lipsync.recognize --check
 ```
 
-That installs PyTorch and torchaudio, and nothing else. In particular it does
+That installs PyTorch and nothing else. In particular it does
 **not** install espnet: the stock package has no 3D-convolution visual front end
 and cannot load these checkpoints. The modified subset that can is vendored in
 `lipsync/vendor/` and is placed ahead of any installed espnet automatically, so
@@ -89,10 +89,10 @@ The MIT licence on *this* repository covers the code here, not the weights.
 
 ## Cost of running
 
-CPU-only, single-threaded beam search dominates: on the order of minutes for a
-few seconds of video. The 40-wide beam over a 5000-token vocabulary is the
-expensive part. A CUDA GPU changes this substantially; set `device="cuda"` when
-constructing `AutoAVSRRecognizer`.
+Measured on a plain GitHub CI runner (CPU only): the model loads in about 3
+seconds and a 2-second clip decodes in about 7. The one-off ~1.2 GB weight
+download is the slow part, at roughly 30 minutes on that runner. A CUDA GPU is
+picked up automatically when present.
 
 Memory: roughly 2–3 GB resident with both models loaded. Loading is expensive, so
 reuse one `AutoAVSRRecognizer` across videos rather than constructing per call.
