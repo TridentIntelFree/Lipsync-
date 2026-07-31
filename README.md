@@ -20,7 +20,45 @@ lipsync talk.mp4
 
 Both are covered in [docs/RUNNING_WITHOUT_A_PC.md](docs/RUNNING_WITHOUT_A_PC.md).
 
+## Does it actually work?
+
+Yes, on good footage. Measured, not asserted — CI transcribes clips of real
+actors speaking twelve known sentences on every push and scores them word by
+word:
+
+```
+expected                                heard                                    WER
+It's eleven o'clock                     IT'S ELEVEN O'CLOCK                       0%
+I'm on my way to the meeting            I'M ON MY WAY TO THE MEETING              0%
+I think I have a doctor's appointment   I THINK I HAVE A DOCTOR'S APPOINTMENT     0%
+We'll stop in a couple of minutes       WE'LL STOP IN A COUPLE OF MINUTES         0%
+The surface is slick                    THE SURFACE IS NAKED                     25%
+Don't forget a jacket                   DON'T FORGET JACK                        50%
+
+15 clips, 6% word error rate, 94% of words recovered
+```
+
+Eleven of fifteen were word-perfect from lip movement alone, with no audio.
+
+**Do not plan around that 6%.** It is a best case and a flattering one:
+
+- **Only twelve possible sentences.** The language model is doing enormous work
+  — recognise a few mouth shapes and it can snap to a phrase it has effectively
+  memorised. Real speech is open-vocabulary and has no such crutch.
+- Short, common sentences, spoken clearly by actors, frontal, evenly lit,
+  professionally recorded, one speaker, neutral delivery.
+
+The published figure for this checkpoint on open-vocabulary TED talks is **19%**,
+and arbitrary phone footage will be worse than that. Treat 6% as the ceiling
+this tool can reach under laboratory conditions, not what you will get.
+
+Reproduce with `python scripts/measure_accuracy.py`.
+
 ## Read this before you trust any output
+
+Even at 6%, look at that last row: "slick" became "naked". The visual signal was
+ambiguous and the language model picked a plausible word. That mechanism is
+always running, and on harder footage it dominates.
 
 Automated lip reading is much weaker than it looks in demos, and it fails in a
 way that is unusually easy to be fooled by.
