@@ -99,13 +99,33 @@ def _error(message: str) -> str:
 # --------------------------------------------------------------------------
 
 
+def _step(progress, fraction: float, message: str) -> None:
+    """Report a stage, tolerating being called outside a Gradio event."""
+    if progress is None:
+        return
+    try:
+        progress(fraction, desc=message)
+    except Exception:  # noqa: BLE001 - progress must never break the analysis
+        pass
+
+
 @gpu_task
-def analyse(video_path: str | None, transcribe: bool, max_seconds: float):
-    """Preprocess a video and, optionally, transcribe it."""
+def analyse(
+    video_path: str | None,
+    transcribe: bool,
+    max_seconds: float,
+    progress=None,
+):
+    """Preprocess a video and, optionally, transcribe it.
+
+    Reports each stage. Recognition can run for minutes — the first run also
+    downloads about a gigabyte — and without this the interface looks frozen.
+    """
     if not video_path:
         return "Upload or record a video to begin.", None, ""
 
     try:
+        _step(progress, 0.05, "Decoding video and finding the face")
         prepared = prepare(video_path, max_seconds=max_seconds or None)
     except Exception as exc:  # noqa: BLE001 - surfaced, not swallowed
         traceback.print_exc()
@@ -127,8 +147,11 @@ def analyse(video_path: str | None, transcribe: bool, max_seconds: float):
         )
 
     try:
-        from lipsync.recognize import BackendMissing, recognize
+        from lipsync.recognize import BackendMissing, recognize, weights_present
 
+        if not weights_present():
+            _step(progress, 0.35, "Downloading the model (~1 GB, first run only)")
+        _step(progress, 0.6, "Reading lips — this can take a few minutes")
         result = recognize(prepared)
     except BackendMissing as exc:
         return quality, strip, f"**Recognition backend unavailable.**\n\n```\n{exc}\n```"
@@ -317,7 +340,7 @@ def build() -> gr.Blocks:
                         transcript = gr.Markdown()
 
                 run.click(
-                    analyse,
+                    lambda v, t, m, progress=gr.Progress(): analyse(v, t, m, progress),
                     inputs=[video, transcribe, max_seconds],
                     outputs=[quality, strip, transcript],
                 )
