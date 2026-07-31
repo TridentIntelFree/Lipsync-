@@ -131,6 +131,49 @@ def _load_captions(directory: Path, offset: float) -> tuple[list[Caption], str |
     return [], None
 
 
+# YouTube serves different player APIs to different clients, and which ones are
+# reachable from a given IP changes constantly. Trying several costs a few
+# seconds and rescues a lot of otherwise-dead fetches.
+_PLAYER_CLIENTS = (None, "tv", "android", "ios", "web_safari")
+
+# Signatures that mean "the site refused us", not "the URL is wrong".
+_BLOCKED_SIGNS = (
+    "sign in to confirm",
+    "not a bot",
+    "http error 403",
+    "unable to download api page",
+    "failed to extract any player response",
+    "requested format is not available",
+    "this content isn't available",
+    "video unavailable",
+)
+
+
+def explain_failure(error_text: str) -> str:
+    """Turn a yt-dlp failure into something worth acting on."""
+    lowered = error_text.lower()
+
+    if any(sign in lowered for sign in _BLOCKED_SIGNS):
+        return (
+            "The site refused the download. YouTube blocks requests coming from "
+            "datacenters, which is where this app runs — so public videos often "
+            "fail here even though they play fine in your browser.\n\n"
+            "Download the clip on your own device and upload the file instead. "
+            "That path does not touch the site at all and always works."
+        )
+    if "is not a valid url" in lowered:
+        return "That does not look like a video link. Paste the full URL, starting with https://."
+    if "private" in lowered or "members-only" in lowered:
+        return "That video is private or members-only, so it cannot be fetched."
+    if "no video formats" in lowered:
+        return "No downloadable video was found at that link."
+    return (
+        "The download failed. If this is a YouTube link it is most likely their "
+        "block on datacenter traffic — download the clip yourself and upload the "
+        "file instead."
+    )
+
+
 def fetch_clip(
     url: str,
     workdir: str | Path,
@@ -173,11 +216,25 @@ def fetch_clip(
             }
         )
 
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except Exception as exc:  # noqa: BLE001 - yt-dlp raises many types
-        raise SourceError(f"Could not fetch {url}: {exc}") from exc
+    info = None
+    last_error: Exception | None = None
+    for client in _PLAYER_CLIENTS:
+        attempt = dict(options)
+        if client:
+            attempt["extractor_args"] = {"youtube": {"player_client": [client]}}
+        try:
+            with yt_dlp.YoutubeDL(attempt) as ydl:
+                info = ydl.extract_info(url, download=True)
+            last_error = None
+            break
+        except Exception as exc:  # noqa: BLE001 - yt-dlp raises many types
+            last_error = exc
+            # Clear partial output so the next attempt starts clean.
+            for leftover in workdir.glob("clip.*"):
+                leftover.unlink(missing_ok=True)
+
+    if last_error is not None:
+        raise SourceError(explain_failure(str(last_error))) from last_error
 
     videos = [
         p for p in sorted(workdir.iterdir())

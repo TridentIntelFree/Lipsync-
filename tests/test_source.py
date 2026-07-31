@@ -89,3 +89,37 @@ def test_clip_reports_whether_captions_exist(tmp_path):
     )
     assert withcaps.has_captions
     assert withcaps.caption_text() == "hello there"
+
+
+# --- failure messages ---------------------------------------------------
+
+
+def test_bot_check_is_explained_as_a_datacenter_block():
+    from lipsync.source import explain_failure
+
+    for text in [
+        "ERROR: Sign in to confirm you're not a bot",
+        "ERROR: unable to download API page: HTTP Error 403: Forbidden",
+        "ERROR: Failed to extract any player response",
+    ]:
+        advice = explain_failure(text)
+        assert "datacenter" in advice
+        assert "upload the file" in advice
+
+
+def test_a_bad_url_says_so_rather_than_blaming_the_site():
+    from lipsync.source import explain_failure
+
+    assert "does not look like a video link" in explain_failure("'x' is not a valid URL")
+
+
+def test_private_video_is_named_as_such():
+    from lipsync.source import explain_failure
+
+    assert "private" in explain_failure("ERROR: This video is private").lower()
+
+
+def test_unknown_failures_still_suggest_the_working_path():
+    from lipsync.source import explain_failure
+
+    assert "upload the file" in explain_failure("something entirely unexpected")
