@@ -1,21 +1,26 @@
-"""Browser interface for lipsync.
+"""Lipsync dashboard.
 
-Runs anywhere Python does — a laptop, a Colab notebook, or a Hugging Face Space —
-and is used from any device with a browser. That split matters: the pipeline
-needs PyTorch, ffmpeg and a gigabyte of weights, which no phone can provide, but
-any phone can open a web page pointed at a machine that does.
+Give it a video — a file, a recording, or a link — and it plays the video beside
+a timeline of what it thinks was said, segment by segment. The timeline follows
+along as the video plays, and tapping a row jumps the video there.
 
-Launch:
+The layout is deliberately built around checking rather than reading. The mouth
+crops the model actually received sit next to its output, and where a video has
+captions they are shown beside each guess with a measured error rate. A lip
+reading model always returns fluent English; the only way to know whether it
+read anything is to look at what went in and compare with what was really said.
+
+Runs anywhere Python does — a laptop, Colab, or a Hugging Face Space — and is
+used from any device with a browser.
 
     python app.py                 # local, http://127.0.0.1:7860
     python app.py --share         # plus a public link, for use from a phone
-
-See docs/RUNNING_WITHOUT_A_PC.md.
 """
 
 from __future__ import annotations
 
 import argparse
+import html
 import tempfile
 import traceback
 from pathlib import Path
@@ -24,7 +29,6 @@ import gradio as gr
 import numpy as np
 
 from lipsync.assets import DownloadError
-from lipsync.pipeline import prepare
 from lipsync.quality import Verdict
 from lipsync.segments import DEFAULT_SEGMENT_SECONDS
 
@@ -33,7 +37,7 @@ from lipsync.segments import DEFAULT_SEGMENT_SECONDS
 try:  # pragma: no cover - depends on the host
     import spaces
 
-    gpu_task = spaces.GPU(duration=120)
+    gpu_task = spaces.GPU(duration=180)
 except Exception:  # pragma: no cover
 
     def gpu_task(fn):
@@ -49,54 +53,132 @@ _VERDICT_STYLE = {
 _MARKER = {Verdict.GOOD: "ok", Verdict.MARGINAL: "warn", Verdict.UNUSABLE: "fail"}
 
 
+# --------------------------------------------------------------------------
+# Timeline: rows carry their own timing, the script below does the rest
+# --------------------------------------------------------------------------
+
+TIMELINE_JS = """
+let wiredVideo = null;
+let lastActive = null;
+
+const findVideo = () => {
+  const all = Array.from(document.querySelectorAll('video'));
+  return all.find(v => v.src || v.currentSrc) || all[0] || null;
+};
+
+const rows = () => Array.from(element.querySelectorAll('[data-start]'));
+
+const paint = (row, on) => {
+  row.style.background = on ? 'rgba(99,102,241,.16)' : 'transparent';
+  row.style.borderLeftColor = on ? '#6366f1' : 'transparent';
+};
+
+const sync = () => {
+  const video = findVideo();
+  if (!video) return;
+  const time = video.currentTime;
+  let active = null;
+  for (const row of rows()) {
+    const on = time >= parseFloat(row.dataset.start) && time < parseFloat(row.dataset.end);
+    paint(row, on);
+    if (on) active = row;
+  }
+  if (active && active !== lastActive) {
+    active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    lastActive = active;
+  }
+};
+
+const wire = () => {
+  for (const row of rows()) {
+    if (row.dataset.bound) continue;
+    row.dataset.bound = '1';
+    row.style.cursor = 'pointer';
+    row.style.borderLeft = '3px solid transparent';
+    row.addEventListener('click', () => {
+      const video = findVideo();
+      if (!video) return;
+      video.currentTime = parseFloat(row.dataset.start);
+      video.play().catch(() => {});
+    });
+  }
+  const video = findVideo();
+  if (video && video !== wiredVideo) {
+    wiredVideo = video;
+    lastActive = null;
+    video.addEventListener('timeupdate', sync);
+    video.addEventListener('seeked', sync);
+  }
+};
+
+wire();
+// The timeline is replaced on every run and Gradio may swap the video element,
+// so keep re-wiring rather than assuming a stable DOM.
+setInterval(wire, 700);
+"""
+
+
 def _quality_html(report) -> str:
     colour, label = _VERDICT_STYLE[report.verdict]
     rows = []
     for check in report.checks:
         tint = _VERDICT_STYLE[check.verdict][0]
         rows.append(
-            f'<tr><td style="padding:4px 12px 4px 0;color:{tint};'
-            f'font-weight:600;white-space:nowrap">{_MARKER[check.verdict]}</td>'
-            f'<td style="padding:4px 12px 4px 0;white-space:nowrap">{check.name}</td>'
-            f'<td style="padding:4px 0;opacity:.85">{check.message}</td></tr>'
+            f'<tr><td style="padding:3px 10px 3px 0;color:{tint};font-weight:600">'
+            f"{_MARKER[check.verdict]}</td>"
+            f'<td style="padding:3px 10px 3px 0;white-space:nowrap">{check.name}</td>'
+            f'<td style="padding:3px 0;opacity:.8">{html.escape(check.message)}</td></tr>'
         )
     return (
-        f'<div style="border-left:4px solid {colour};padding:8px 0 8px 14px">'
-        f'<div style="font-size:1.05em;font-weight:700;color:{colour}">{label}</div>'
-        f'<table style="border-collapse:collapse;margin-top:8px;font-size:.92em">'
+        f'<div style="border-left:4px solid {colour};padding:6px 0 6px 12px">'
+        f'<div style="font-weight:700;color:{colour}">{label}</div>'
+        f'<table style="border-collapse:collapse;margin-top:6px;font-size:.86em">'
         f'{"".join(rows)}</table></div>'
     )
 
 
-def _roi_filmstrip(rois: np.ndarray, count: int = 10) -> np.ndarray | None:
-    """A strip of evenly spaced mouth crops, so you can see what the model saw.
+def _timeline_html(analysis, has_reference: bool) -> str:
+    """The dashboard's centre: one row per segment, timed for the player."""
+    if not analysis.segments:
+        return (
+            '<p style="opacity:.7">No segments long enough to analyse. Try a '
+            "longer clip or a shorter segment length.</p>"
+        )
 
-    The single most useful output here: if this is not centred on a mouth,
-    nothing downstream can work, and no amount of transcript plausibility should
-    convince you otherwise.
-    """
+    rows = []
+    for seg in analysis.segments:
+        guess = html.escape(seg.transcript) if seg.transcript else "—"
+        block = (
+            f'<div style="font-size:.95em;line-height:1.45">{guess}</div>'
+        )
+        if has_reference and seg.reference:
+            wer = f"{seg.score.wer:.0%}" if seg.score else "—"
+            block += (
+                f'<div style="font-size:.85em;opacity:.65;margin-top:3px">'
+                f"actually said: {html.escape(seg.reference)}</div>"
+                f'<div style="font-size:.78em;opacity:.55;margin-top:2px">'
+                f"{wer} word error rate</div>"
+            )
+        rows.append(
+            f'<div data-start="{seg.start:.2f}" data-end="{seg.end:.2f}" '
+            f'style="padding:8px 10px;border-bottom:1px solid rgba(128,128,128,.18);'
+            f'transition:background .15s">'
+            f'<div style="font-size:.75em;opacity:.55;letter-spacing:.03em">'
+            f"{seg.timestamp}</div>{block}</div>"
+        )
+
+    return (
+        '<div style="max-height:420px;overflow-y:auto;border:1px solid '
+        'rgba(128,128,128,.25);border-radius:8px">' + "".join(rows) + "</div>"
+    )
+
+
+def _roi_filmstrip(rois: np.ndarray, count: int = 10) -> np.ndarray | None:
+    """Evenly spaced mouth crops — what the model actually received."""
     if rois is None or len(rois) == 0:
         return None
     picks = np.linspace(0, len(rois) - 1, min(count, len(rois))).astype(int)
     return np.hstack([rois[i] for i in picks])
-
-
-def _header(prepared) -> str:
-    return (
-        f'<div style="opacity:.7;margin-bottom:10px">'
-        f"{prepared.info.width}x{prepared.info.height} at {prepared.info.fps:g} fps "
-        f"&middot; {len(prepared.mouth_rois)} frames analysed "
-        f"({prepared.duration_seconds:.1f}s)</div>"
-    )
-
-
-def _error(message: str) -> str:
-    return f'<div style="color:#b3261e"><b>{message}</b></div>'
-
-
-# --------------------------------------------------------------------------
-# Tab 1: a video you upload or record
-# --------------------------------------------------------------------------
 
 
 def _step(progress, fraction: float, message: str) -> None:
@@ -109,200 +191,137 @@ def _step(progress, fraction: float, message: str) -> None:
         pass
 
 
+def _blank(message: str):
+    return None, message, "", None, ""
+
+
+# --------------------------------------------------------------------------
+
+
 @gpu_task
-def analyse(
+def run(
     video_path: str | None,
-    transcribe: bool,
-    max_seconds: float,
-    progress=None,
-):
-    """Preprocess a video and, optionally, transcribe it.
-
-    Reports each stage. Recognition can run for minutes — the first run also
-    downloads about a gigabyte — and without this the interface looks frozen.
-    """
-    if not video_path:
-        return "Upload or record a video to begin.", None, ""
-
-    try:
-        _step(progress, 0.05, "Decoding video and finding the face")
-        prepared = prepare(video_path, max_seconds=max_seconds or None)
-    except Exception as exc:  # noqa: BLE001 - surfaced, not swallowed
-        traceback.print_exc()
-        return _error(f"Could not read that video.<br>{type(exc).__name__}: {exc}"), None, ""
-
-    quality = _header(prepared) + _quality_html(prepared.quality)
-    strip = _roi_filmstrip(prepared.mouth_rois)
-
-    if not transcribe:
-        return quality, strip, ""
-
-    if prepared.quality.verdict is Verdict.UNUSABLE:
-        return (
-            quality,
-            strip,
-            "**No transcript.** This footage cannot support a reading, and a "
-            "transcript produced from it would be invention rather than a guess. "
-            "Fix what is flagged above and try again.",
-        )
-
-    try:
-        from lipsync.recognize import BackendMissing, recognize, weights_present
-
-        if not weights_present():
-            _step(progress, 0.35, "Downloading the model (~1 GB, first run only)")
-        _step(progress, 0.6, "Reading lips — this can take a few minutes")
-        result = recognize(prepared)
-    except BackendMissing as exc:
-        return quality, strip, f"**Recognition backend unavailable.**\n\n```\n{exc}\n```"
-    except DownloadError as exc:
-        return quality, strip, f"**Model weights unavailable.**\n\n```\n{exc}\n```"
-    except Exception as exc:  # noqa: BLE001
-        traceback.print_exc()
-        return quality, strip, f"**Recognition failed.**\n\n```\n{type(exc).__name__}: {exc}\n```"
-
-    text = result.text.strip() or "_(nothing recognised)_"
-    return quality, strip, f"### Best guess\n\n> {text}\n\n---\n\n**{result.caveat()}**"
-
-
-# --------------------------------------------------------------------------
-# Tab 2: a video at a URL, analysed in timed segments
-# --------------------------------------------------------------------------
-
-
-def _segments_table(analysis) -> str:
-    if not analysis.segments:
-        return "<p>No segments long enough to analyse.</p>"
-
-    show_reference = analysis.reference_available
-    head = "<tr><th>Time</th><th>Model's guess</th>"
-    head += "<th>Actually said</th><th>Error</th></tr>" if show_reference else "</tr>"
-
-    rows = []
-    for seg in analysis.segments:
-        cells = (
-            f'<td style="white-space:nowrap;opacity:.7;padding:6px 12px 6px 0">'
-            f"{seg.timestamp}</td>"
-            f'<td style="padding:6px 12px 6px 0">{seg.transcript or "—"}</td>'
-        )
-        if show_reference:
-            wer = f"{seg.score.wer:.0%}" if seg.score else "—"
-            cells += (
-                f'<td style="padding:6px 12px 6px 0;opacity:.85">'
-                f'{seg.reference or "—"}</td>'
-                f'<td style="padding:6px 0;white-space:nowrap">{wer}</td>'
-            )
-        rows.append(f"<tr>{cells}</tr>")
-
-    return (
-        '<div style="overflow-x:auto"><table style="border-collapse:collapse;'
-        'font-size:.92em;width:100%">'
-        f'<thead style="text-align:left;opacity:.6">{head}</thead>'
-        f"<tbody>{''.join(rows)}</tbody></table></div>"
-    )
-
-
-@gpu_task
-def analyse_url(
     url: str,
     start: float,
     duration: float,
     segment_seconds: float,
     transcribe: bool,
-    progress=gr.Progress(),
+    progress=None,
 ):
-    """Fetch a clip from a URL and analyse it segment by segment."""
-    if not url or not url.strip():
-        return None, "Paste a video URL to begin.", None, "", ""
-
+    """Analyse a video from a file or a URL and build the dashboard."""
     from lipsync.segments import analyse as analyse_segments
-    from lipsync.source import SourceError, fetch_clip
 
-    workdir = Path(tempfile.mkdtemp(prefix="lipsync-url-"))
-    try:
-        progress(0.05, desc="Fetching the clip")
-        clip = fetch_clip(url.strip(), workdir, start=start, duration=duration)
-    except SourceError as exc:
-        return None, _error(f"Could not fetch that URL.<br>{exc}"), None, "", ""
-    except Exception as exc:  # noqa: BLE001
-        traceback.print_exc()
-        return None, _error(f"Could not fetch that URL.<br>{type(exc).__name__}: {exc}"), None, "", ""
+    url = (url or "").strip()
+    if not url and not video_path:
+        return _blank("Upload a video or paste a link to begin.")
+
+    captions = None
+    caption_source = None
+    title = None
+
+    if url:
+        from lipsync.source import SourceError, fetch_clip
+
+        workdir = Path(tempfile.mkdtemp(prefix="lipsync-url-"))
+        try:
+            _step(progress, 0.05, "Fetching the clip")
+            clip = fetch_clip(url, workdir, start=start, duration=duration)
+        except SourceError as exc:
+            return _blank(f"**Could not fetch that link.**\n\n```\n{exc}\n```")
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            return _blank(f"**Could not fetch that link.**\n\n```\n{type(exc).__name__}: {exc}\n```")
+        video_path = str(clip.path)
+        captions = clip.captions or None
+        caption_source = clip.caption_source
+        title = clip.title
 
     try:
-        progress(0.25, desc="Aligning mouths")
+        _step(progress, 0.2, "Decoding video and finding the face")
         analysis, prepared = analyse_segments(
-            str(clip.path),
+            video_path,
             segment_seconds=segment_seconds,
-            captions=clip.captions,
+            captions=captions,
             transcribe=transcribe,
-            progress=lambda f: progress(0.25 + 0.7 * f, desc="Reading lips"),
+            max_seconds=None if url else (duration or None),
+            progress=lambda f: _step(progress, 0.35 + 0.6 * f, "Reading lips"),
         )
+    except DownloadError as exc:
+        return video_path, f"**Model weights unavailable.**\n\n```\n{exc}\n```", "", None, ""
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
-        return str(clip.path), _error(f"{type(exc).__name__}: {exc}"), None, "", ""
+        return video_path, f"**Analysis failed.**\n\n```\n{type(exc).__name__}: {exc}\n```", "", None, ""
 
-    quality = _header(prepared) + _quality_html(prepared.quality)
-    strip = _roi_filmstrip(prepared.mouth_rois)
+    lines = []
+    if title:
+        lines.append(f"### {html.escape(title)}")
 
-    verdict = f"### {clip.title}\n\n"
-    if clip.has_captions:
-        if analysis.overall:
-            verdict += (
-                f"**Measured against this video's {clip.caption_source}: "
-                f"{analysis.overall.summary()}**\n\n"
-                f"That is the honest number for this footage — not a benchmark "
-                f"figure, not an estimate. Every row below can be checked.\n\n"
-            )
-        else:
-            verdict += f"Captions found ({clip.caption_source}), but nothing to compare yet.\n\n"
+    if prepared.quality.verdict is Verdict.UNUSABLE:
+        lines.append(
+            "**This footage cannot support a reading.** Anything below would be "
+            "invention rather than a guess — see the checks."
+        )
+    elif captions and analysis.overall:
+        lines.append(
+            f"**Measured against this video's {caption_source}: "
+            f"{analysis.overall.summary()}**"
+        )
+        lines.append(
+            "That is the real number for this footage, not a benchmark figure. "
+            "Every row can be checked against the text beside it."
+        )
+    elif captions:
+        lines.append(f"Captions found ({caption_source}), but nothing to compare yet.")
+    elif transcribe:
+        lines.append(
+            "**No captions to check this against.** The model returns fluent "
+            "English whether or not it read anything, so treat every row as "
+            "unverified guessing."
+        )
     else:
-        verdict += (
-            "**No captions on this video, so there is nothing to check the output "
-            "against.** Treat everything below as unverifiable guessing.\n\n"
+        lines.append(
+            "Quality checked only. Tick **Attempt transcripts** to read the lips."
         )
 
-    return str(clip.path), quality, strip, _segments_table(analysis), verdict
+    lines.append(
+        f"\n<sub>{prepared.info.width}x{prepared.info.height} at "
+        f"{prepared.info.fps:g} fps · {len(prepared.mouth_rois)} frames · "
+        f"{prepared.duration_seconds:.1f}s · {len(analysis.segments)} segments</sub>"
+    )
 
-
-# --------------------------------------------------------------------------
+    return (
+        video_path,
+        "\n\n".join(lines),
+        _quality_html(prepared.quality),
+        _roi_filmstrip(prepared.mouth_rois),
+        _timeline_html(analysis, bool(captions)),
+    )
 
 
 INTRO = """
 # Lipsync
 
-Infer what someone said from silent video of them speaking.
+Play a video and follow what the model thinks was said, segment by segment.
 
-**This produces guesses that read as certainties.** The model gets roughly one
-word in five wrong on clean, head-on, well-lit video, and considerably worse on
-anything else. Many sounds look identical on the lips — `p`, `b` and `m` are the
-same picture, as are `f` and `v` — so the gaps are filled by a language model
-that always returns fluent English whether or not it read anything.
-
-Never treat the output as evidence of what a particular person actually said.
+**Output is a guess that reads as a certainty.** Roughly one word in five is
+wrong on clean, head-on, well-lit video and worse on anything else. Many sounds
+are visually identical — `p`, `b` and `m` are the same picture — so the gaps are
+filled by a language model that always returns fluent English. Never treat a row
+below as evidence of what a particular person said.
 """
 
-TIPS = """
-**For the best chance:** face the camera straight on, fill a good part of the
-frame with your head, use even front lighting, keep the mouth unobstructed, and
-speak at a normal pace — exaggerated mouthing is *not* what the model learned
-from and makes results worse.
+HELP = """
+**Tap any row** to jump the video there. Rows highlight as it plays.
 
-The filmstrip shows the aligned mouth crops the model actually receives. If it
-is not centred on a mouth, ignore any transcript.
-"""
+**Best footage:** face-on, head filling much of the frame, even front lighting,
+mouth unobstructed, normal speaking pace. Selfie video works; wide shots do not.
 
-URL_NOTE = """
-Paste a link to a video and it will be fetched, split into short segments, and
-read segment by segment so you can follow along while it plays.
+**Check the filmstrip.** Those are the actual mouth crops fed to the model. If
+they are not centred on a mouth, every row is meaningless.
 
-**If the video has captions, they are used as an answer key** — you get the
-model's guess beside what was actually said, and a real error rate for that
-footage. This is by far the most useful thing you can do with this tool: it
-replaces an unfalsifiable sentence with a measured number.
-
-Downloading from most video sites is against their terms of service, and
-generating quotes for identifiable people from footage this tool cannot reliably
-read is how fabricated quotes get made. Both are your call.
+Links are fetched with yt-dlp, which most video sites prohibit. If the video has
+captions they are used as an answer key, which is the only way to see how wrong
+this really is on footage you care about.
 """
 
 
@@ -310,78 +329,51 @@ def build() -> gr.Blocks:
     with gr.Blocks(title="Lipsync") as demo:
         gr.Markdown(INTRO)
 
-        with gr.Tabs():
-            with gr.Tab("Upload or record"):
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        video = gr.Video(
-                            label="Video of someone speaking",
-                            sources=["upload", "webcam"],
-                        )
-                        transcribe = gr.Checkbox(
-                            value=True,
-                            label="Attempt a transcript",
-                            info="Uncheck to only check whether the footage is usable (fast, no model needed)",
-                        )
-                        max_seconds = gr.Slider(
-                            0, 60, value=15, step=1,
-                            label="Seconds to analyse",
-                            info="0 means the whole clip",
-                        )
-                        run = gr.Button("Analyse", variant="primary")
-                        gr.Markdown(TIPS)
-
-                    with gr.Column(scale=1):
-                        quality = gr.HTML()
-                        strip = gr.Image(
-                            label="What the model sees (aligned mouth crops)",
-                            height=110,
-                        )
-                        transcript = gr.Markdown()
-
-                run.click(
-                    lambda v, t, m, progress=gr.Progress(): analyse(v, t, m, progress),
-                    inputs=[video, transcribe, max_seconds],
-                    outputs=[quality, strip, transcript],
+        with gr.Row():
+            with gr.Column(scale=5):
+                player = gr.Video(
+                    label="Video — upload, record, or load from a link",
+                    sources=["upload", "webcam"],
                 )
-
-            with gr.Tab("From a URL"):
-                gr.Markdown(URL_NOTE)
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        url = gr.Textbox(
-                            label="Video URL",
-                            placeholder="https://www.youtube.com/watch?v=...",
-                        )
-                        with gr.Row():
-                            url_start = gr.Number(value=0, label="Start (seconds)")
-                            url_duration = gr.Number(value=30, label="Length (seconds)")
-                        url_segment = gr.Slider(
-                            2, 15, value=DEFAULT_SEGMENT_SECONDS, step=1,
-                            label="Segment length (seconds)",
-                        )
-                        url_transcribe = gr.Checkbox(value=True, label="Attempt transcripts")
-                        url_run = gr.Button("Fetch and analyse", variant="primary")
-                        url_player = gr.Video(label="The clip", interactive=False)
-
-                    with gr.Column(scale=1):
-                        url_verdict = gr.Markdown()
-                        url_quality = gr.HTML()
-                        url_strip = gr.Image(
-                            label="What the model sees", height=110
-                        )
-                        url_table = gr.HTML()
-
-                url_run.click(
-                    analyse_url,
-                    inputs=[url, url_start, url_duration, url_segment, url_transcribe],
-                    outputs=[url_player, url_quality, url_strip, url_table, url_verdict],
+                url = gr.Textbox(
+                    label="…or paste a video link",
+                    placeholder="https://www.youtube.com/watch?v=...",
                 )
+                with gr.Row():
+                    start = gr.Number(value=0, label="Start (s)", scale=1)
+                    duration = gr.Number(value=30, label="Length (s)", scale=1)
+                    segment = gr.Slider(
+                        2, 15, value=DEFAULT_SEGMENT_SECONDS, step=1,
+                        label="Segment (s)", scale=2,
+                    )
+                transcribe = gr.Checkbox(
+                    value=True,
+                    label="Attempt transcripts",
+                    info="Untick for a fast quality check with no model and no waiting",
+                )
+                go = gr.Button("Analyse", variant="primary")
+                summary = gr.Markdown()
+
+            with gr.Column(scale=4):
+                timeline = gr.HTML(js_on_load=TIMELINE_JS)
+                strip = gr.Image(
+                    label="What the model sees (aligned mouth crops)", height=100
+                )
+                quality = gr.HTML()
+                gr.Markdown(HELP)
+
+        go.click(
+            lambda v, u, s, d, seg, t, progress=gr.Progress(): run(
+                v, u, s, d, seg, t, progress
+            ),
+            inputs=[player, url, start, duration, segment, transcribe],
+            outputs=[player, summary, quality, strip, timeline],
+        )
     return demo
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Launch the lipsync web interface.")
+    parser = argparse.ArgumentParser(description="Launch the lipsync dashboard.")
     parser.add_argument(
         "--share", action="store_true",
         help="create a public link (use this to reach it from a phone)",

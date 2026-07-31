@@ -114,16 +114,21 @@ lipsync talk.mp4 --save-rois r.npy  # dump the aligned mouth crops
 Exit codes: `0` success, `2` input unusable, `3` backend not installed,
 `4` weights could not be downloaded.
 
-Or use the browser interface, which works from any device:
+Or use the dashboard, which works from any device:
 
 ```sh
 python app.py            # http://127.0.0.1:7860
 python app.py --share    # plus a public link, for use from a phone
 ```
 
-It shows the aligned mouth crops the model actually receives alongside the
-transcript — if those are not centred on a mouth, the transcript is meaningless
-however convincing it reads.
+Give it a file, a recording, or a link. It plays the video beside a timeline of
+what it thinks was said, segment by segment; the timeline highlights and scrolls
+as the video plays, and tapping a row jumps the video there.
+
+The layout is built for checking rather than reading. The aligned mouth crops the
+model actually received sit beside its output — if those are not centred on a
+mouth, every row is meaningless however convincing it reads. Where a video has
+captions, they are shown against each guess with a measured error rate.
 
 From Python:
 
@@ -197,11 +202,14 @@ which is why those values live in `constants.py` with their provenance recorded.
 | `recognize.py` | Weight fetching, transcript plus caveat |
 | `backend.py` | Checkpoint loading and beam search |
 | `vendor/` | Modified espnet providing the visual front end (see `VENDOR.md`) |
-| `app.py` | Browser interface, usable from any device |
+| `app.py` | Dashboard: player, synced timeline, quality panel |
+| `source.py` | Fetch a clip and its captions from a URL |
+| `segments.py` | Timed segmentation and per-segment analysis |
+| `score.py` | Word error rate against a known transcript |
 
 ## Status
 
-`pytest` runs 91 tests. Verified:
+`pytest` runs 100 tests. Verified:
 
 - Decode and frame-rate resampling, on real generated video files.
 - Alignment recovers the canonical face layout under arbitrary rotation, scale
