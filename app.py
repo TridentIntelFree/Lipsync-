@@ -318,13 +318,15 @@ def run(
 INTRO = """
 # Lipsync
 
-Play a video and follow what the model thinks was said, segment by segment.
+**Choose a video of someone speaking, then press Analyse.** You get what the
+model thinks was said, timed so you can follow along as the video plays.
 
-**Output is a guess that reads as a certainty.** Roughly one word in five is
-wrong on clean, head-on, well-lit video and worse on anything else. Many sounds
-are visually identical — `p`, `b` and `m` are the same picture — so the gaps are
-filled by a language model that always returns fluent English. Never treat a row
-below as evidence of what a particular person said.
+Nothing else is required. The first run takes a few minutes while it downloads
+the model; after that it is quick.
+
+*The output is a guess that reads like a certainty. On clean, head-on footage
+it recovers most words; on anything harder it invents plausible English and
+gives no sign that it has. Never use it to claim someone said something.*
 """
 
 HELP = """
@@ -348,34 +350,39 @@ def build() -> gr.Blocks:
 
         with gr.Row():
             with gr.Column(scale=5):
+                # One input, one button. Everything else is tucked away: the
+                # common case is "here is a video, tell me what they said".
                 player = gr.Video(
-                    label="Video — upload, record, or load from a link",
+                    label="1. Choose a video of someone speaking",
                     sources=["upload", "webcam"],
+                    height=300,
                 )
                 attachment = gr.File(
-                    label="…or attach a video file (use this if the player above will not take one)",
+                    label="…or attach a file, if the box above will not take one",
                     file_types=["video", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"],
                     type="filepath",
                 )
-                url = gr.Textbox(
-                    label="…or paste a video link",
-                    placeholder="https://www.youtube.com/watch?v=...",
-                    info="Most sites block downloads from cloud servers; attaching a file always works",
-                )
-                with gr.Row():
-                    start = gr.Number(value=0, label="Start (s)", scale=1)
-                    duration = gr.Number(value=30, label="Length (s)", scale=1)
+                go = gr.Button("2. Analyse", variant="primary", size="lg")
+                summary = gr.Markdown()
+
+                with gr.Accordion("More options", open=False):
+                    url = gr.Textbox(
+                        label="Load from a link instead",
+                        placeholder="https://...",
+                        info="Most sites block downloads from cloud servers; attaching a file always works",
+                    )
+                    transcribe = gr.Checkbox(
+                        value=True,
+                        label="Attempt transcripts",
+                        info="Untick for a quick quality check with no model and no waiting",
+                    )
+                    with gr.Row():
+                        start = gr.Number(value=0, label="Start (s)")
+                        duration = gr.Number(value=30, label="Length (s)")
                     segment = gr.Slider(
                         2, 15, value=DEFAULT_SEGMENT_SECONDS, step=1,
-                        label="Segment (s)", scale=2,
+                        label="Segment length (s)",
                     )
-                transcribe = gr.Checkbox(
-                    value=True,
-                    label="Attempt transcripts",
-                    info="Untick for a fast quality check with no model and no waiting",
-                )
-                go = gr.Button("Analyse", variant="primary")
-                summary = gr.Markdown()
 
             with gr.Column(scale=4):
                 timeline = gr.HTML(js_on_load=TIMELINE_JS)
@@ -383,7 +390,8 @@ def build() -> gr.Blocks:
                     label="What the model sees (aligned mouth crops)", height=100
                 )
                 quality = gr.HTML()
-                gr.Markdown(HELP)
+                with gr.Accordion("How to get a usable result", open=False):
+                    gr.Markdown(HELP)
 
         go.click(
             lambda v, u, s, d, seg, t, a, progress=gr.Progress(): run(
