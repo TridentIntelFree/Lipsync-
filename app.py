@@ -206,14 +206,31 @@ def run(
     duration: float,
     segment_seconds: float,
     transcribe: bool,
+    attachment=None,
     progress=None,
 ):
-    """Analyse a video from a file or a URL and build the dashboard."""
+    """Analyse a video from a file, an attachment or a URL, and build the dashboard.
+
+    Three inputs because the pretty one is the least reliable: the video widget
+    can fail outright on mobile browsers, so a plain file attachment is offered
+    as a way in that almost always works.
+    """
     from lipsync.segments import analyse as analyse_segments
 
     url = (url or "").strip()
+
+    # An attachment wins over the video widget: someone who used it did so
+    # deliberately, most likely because the widget did not work for them.
+    if attachment:
+        video_path = attachment if isinstance(attachment, str) else getattr(
+            attachment, "name", None
+        )
+
     if not url and not video_path:
-        return _blank("Upload a video or paste a link to begin.")
+        return _blank(
+            "Add a video to begin — use the player, the **attach a file** box, "
+            "or paste a link."
+        )
 
     captions = None
     caption_source = None
@@ -335,9 +352,15 @@ def build() -> gr.Blocks:
                     label="Video — upload, record, or load from a link",
                     sources=["upload", "webcam"],
                 )
+                attachment = gr.File(
+                    label="…or attach a video file (use this if the player above will not take one)",
+                    file_types=["video", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"],
+                    type="filepath",
+                )
                 url = gr.Textbox(
                     label="…or paste a video link",
                     placeholder="https://www.youtube.com/watch?v=...",
+                    info="Most sites block downloads from cloud servers; attaching a file always works",
                 )
                 with gr.Row():
                     start = gr.Number(value=0, label="Start (s)", scale=1)
@@ -363,10 +386,10 @@ def build() -> gr.Blocks:
                 gr.Markdown(HELP)
 
         go.click(
-            lambda v, u, s, d, seg, t, progress=gr.Progress(): run(
-                v, u, s, d, seg, t, progress
+            lambda v, u, s, d, seg, t, a, progress=gr.Progress(): run(
+                v, u, s, d, seg, t, a, progress
             ),
-            inputs=[player, url, start, duration, segment, transcribe],
+            inputs=[player, url, start, duration, segment, transcribe, attachment],
             outputs=[player, summary, quality, strip, timeline],
         )
     return demo

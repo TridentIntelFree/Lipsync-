@@ -43,8 +43,30 @@ def segment(index=0, start=0.0, end=3.0, text="hello there", reference=None):
 def test_no_input_asks_for_one():
     player, summary, quality, strip, timeline = web_app.run(None, "", 0, 30, 6, True)
     assert player is None
-    assert "Upload a video or paste a link" in summary
+    assert "Add a video to begin" in summary
     assert strip is None
+
+
+def test_an_attachment_is_accepted_as_a_video_source(faceless_video):
+    """The video widget fails on some mobile browsers; the attachment must work."""
+    player, _, _, _, _ = web_app.run(None, "", 0, 30, 6, False, str(faceless_video))
+    assert player == str(faceless_video)
+
+
+def test_attachment_objects_are_unwrapped(faceless_video):
+    class Uploaded:
+        name = str(faceless_video)
+
+    player, _, _, _, _ = web_app.run(None, "", 0, 30, 6, False, Uploaded())
+    assert player == str(faceless_video)
+
+
+def test_attachment_wins_over_the_player(faceless_video):
+    """Using the fallback is a deliberate act; honour it over a stale player value."""
+    player, _, _, _, _ = web_app.run(
+        "/does/not/exist.mp4", "", 0, 30, 6, False, str(faceless_video)
+    )
+    assert player == str(faceless_video)
 
 
 def test_unreadable_file_reports_instead_of_raising(tmp_path):
